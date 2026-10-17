@@ -1,7 +1,7 @@
 {
-  "name": "practical-7-task-management",
+  "name": "practical-9-task-management",
   "version": "1.0.0",
-  "description": "Task Management Application with JWT Authentication and Middleware Pipeline",
+  "description": "Task Management Application with In-Memory Caching and Query Optimization",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

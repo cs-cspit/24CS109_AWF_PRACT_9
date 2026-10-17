@@ -1,112 +1,187 @@
-# Practical 7 — Task Management with JWT Authentication
+# Practical 9 — In-Memory Caching and Query Optimization
 
-A full-stack Task Management application with JWT-based authentication, bcrypt password hashing, and Express middleware pipeline.
+A full-stack Task Management application featuring JWT-based authentication, bcrypt password hashing, server-side in-memory caching with `node-cache`, MongoDB query optimization (compound indexing & `.lean()` queries), and cache telemetry monitoring.
+
+---
 
 ## Tech Stack
 
-- **Backend:** Node.js, Express.js, Mongoose
+- **Backend:** Node.js, Express.js, Mongoose, `node-cache`
 - **Database:** MongoDB
-- **Auth:** bcryptjs, jsonwebtoken
+- **Authentication & Security:** bcryptjs, jsonwebtoken
 - **Validation:** express-validator
-- **Frontend:** HTML, CSS, JavaScript
+- **Frontend:** React, Vite / HTML, CSS, JavaScript
+
+---
 
 ## Features
 
-- User registration with bcrypt password hashing
-- JWT-based login with 1-hour token expiry
-- Auth middleware protecting all task routes
-- Server-side input validation middleware
-- Full CRUD for tasks (scoped to authenticated user)
-- `/me` endpoint for current user details
-- 401 handling — frontend redirects to login on expired token
-- Logout clears token from client
+- **In-Memory Caching (`node-cache`)**:
+  - Default 60-second TTL (`stdTTL: 60`) with automated eviction.
+  - Multi-tenant user-scoped cache keys (`tasks:${userId}` and `task:${userId}:${taskId}`).
+  - Cached responses return `X-Cache: HIT`; cache misses return `X-Cache: MISS`.
+- **Cache Invalidation on Writes**:
+  - Write operations (`POST`, `PUT`, `DELETE`) automatically invalidate affected cache keys only after successful database execution.
+- **MongoDB Query Optimization**:
+  - Single field index on `user` and compound index on `{ user: 1, createdAt: -1 }` to eliminate full collection scans (`COLLSCAN`) and memory sort stages.
+  - `.lean()` execution to bypass Mongoose document hydration, significantly lowering memory footprint and execution latency.
+- **Cache Telemetry & Debugging**:
+  - Protected endpoint `GET /api/tasks/cache-stats` reporting hits, misses, sets, invalidations, and key counts without leaking sensitive data.
+  - Reset endpoint `POST /api/tasks/cache-stats/reset` to reset counters for clean benchmarking.
+- **Benchmarking & Cache Bypass**:
+  - Support for `x-skip-cache: true` request header and `CACHE_ENABLED=false` environment toggle for baseline measurement.
+- **Core App Features**:
+  - User registration with bcrypt password hashing (salt rounds = 10).
+  - JWT-based login with 1-hour token expiry.
+  - Auth middleware protecting all task and cache routes.
+  - Server-side input validation middleware.
+  - Full CRUD for tasks (strictly scoped to the authenticated user).
 
-## Setup
+---
+
+## Setup & Installation
 
 ```bash
-# 1. Clone the repo
-git clone https://github.com/24cs73-prince/24CS073_AWDF_P7.git
-cd 24CS073_AWDF_P7
+# 1. Clone the repository
+git clone https://github.com/24cs73-prince/24CS073_AWDF_P9.git
+cd 24CS073_AWDF_P9
 
 # 2. Install dependencies
 npm install
 
-# 3. Create .env file (copy from .env.example)
+# 3. Create .env configuration file
 cp .env.example .env
-# Edit .env with your MongoDB URI and JWT secret
+# Configure MONGO_URI, JWT_SECRET, and PORT in .env
 
-# 4. Start the server
+# 4. Run automated test suite
+npm test
+
+# 5. Start the backend development server
 npm run dev
 
-# 5. Open http://localhost:5000
+# 6. Access the application
+# Frontend / API: http://localhost:5000
 ```
+
+---
+
+## Environment Variables (.env)
+
+```env
+PORT=5000
+MONGO_URI=mongodb://localhost:27017/taskmanager
+JWT_SECRET=your_jwt_secret_key
+# Optional: Set to false to disable in-memory caching during benchmarking
+CACHE_ENABLED=true
+```
+
+---
 
 ## API Endpoints
 
-### Auth
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/api/auth/register` | Register a new user |
-| POST | `/api/auth/login` | Login and get JWT token |
-| GET | `/api/auth/me` | Get current user (protected) |
+### Authentication
+| Method | Endpoint | Description | Auth Required |
+|--------|----------|-------------|---------------|
+| POST | `/api/auth/register` | Register a new user with hashed password | No |
+| POST | `/api/auth/login` | Login and receive signed JWT token | No |
+| GET | `/api/auth/me` | Fetch currently logged-in user profile | Bearer Token |
 
-### Tasks (All protected — require Bearer token)
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/tasks` | Get all tasks for logged-in user |
-| POST | `/api/tasks` | Create a new task |
-| PUT | `/api/tasks/:id` | Update a task |
-| DELETE | `/api/tasks/:id` | Delete a task |
+### Tasks & In-Memory Caching
+| Method | Endpoint | Description | Cache Behavior | Auth Required |
+|--------|----------|-------------|----------------|---------------|
+| GET | `/api/tasks` | Get all tasks for logged-in user | Checks `tasks:${userId}` cache; returns `X-Cache: HIT` or `MISS` (60s TTL) | Bearer Token |
+| GET | `/api/tasks/:id` | Get single task by ID | Checks `task:${userId}:${id}` cache; returns `X-Cache: HIT` or `MISS` (60s TTL) | Bearer Token |
+| POST | `/api/tasks` | Create a new task | Invalidates `tasks:${userId}` cache | Bearer Token |
+| PUT | `/api/tasks/:id` | Update an existing task | Invalidates `tasks:${userId}` and `task:${userId}:${id}` caches | Bearer Token |
+| DELETE | `/api/tasks/:id` | Delete a task | Invalidates `tasks:${userId}` and `task:${userId}:${id}` caches | Bearer Token |
 
-## Architecture
+### Cache Telemetry & Debug
+| Method | Endpoint | Description | Auth Required |
+|--------|----------|-------------|---------------|
+| GET | `/api/tasks/cache-stats` | Returns cache hit/miss counters and stats | Bearer Token |
+| POST | `/api/tasks/cache-stats/reset` | Resets telemetry counters to zero | Bearer Token |
 
+---
+
+## In-Memory Caching Architecture
+
+### 1. Shared Cache Module (`utils/cache.js`)
+Configured using `node-cache`:
+```javascript
+const NodeCache = require('node-cache');
+const cache = new NodeCache({ stdTTL: 60, checkperiod: 120 });
+module.exports = cache;
 ```
 
-## Practical 8 — Performance Optimization & Lazy Loading in React
+### 2. Multi-Tenant Cache Keys
+To maintain strict tenant isolation across multiple users:
+- **All Tasks:** `tasks:${req.user.id}`
+- **Single Task:** `task:${req.user.id}:${req.params.id}`
 
-### Overview
-Practical 8 introduces route-based code splitting and lazy loading to optimize initial application load time and minimize the initial JavaScript payload size delivered to the user.
+User A cannot retrieve or invalidate tasks belonging to User B.
 
-### Concepts & Concepts Implemented
-- **Lazy Loading**: A performance optimization strategy where resources/components are fetched on-demand when required, rather than downloading the entire application payload upfront.
-- **`React.lazy()`**: React standard utility that dynamically imports a component using ECMAScript dynamic `import()`, enabling automated code-splitting by bundlers like Vite.
-- **`React.Suspense`**: A React component boundary wrapper that displays fallback UI (`<LoadingPage />`) while pending dynamically-imported route chunks are being fetched across the network.
-- **Route-Based Code Splitting**:
-  - `Home` (`/`) route remains a static import loaded during initial render.
-  - `Projects` (`/projects`) route is lazy-loaded into a separate bundle chunk (`Projects-*.js`).
-  - `Contact` (`/contact`) route is lazy-loaded into a separate bundle chunk (`Contact-*.js`).
+### 3. Cache Invalidation Strategy
+Invalidation triggers **only after** successful database operations:
+- `POST /api/tasks` ➔ Clears `tasks:${userId}`.
+- `PUT /api/tasks/:id` ➔ Clears both `tasks:${userId}` and `task:${userId}:${taskId}`.
+- `DELETE /api/tasks/:id` ➔ Clears both `tasks:${userId}` and `task:${userId}:${taskId}`.
 
-### Bundle Structure & Loading Mechanics
-Route-specific JavaScript is now decoupled from the main bundle and fetched only when navigating to `/projects` or `/contact`. 
+Validation errors (`400`) or not-found results (`404`) do not trigger invalidations.
 
-Note: Network performance metrics (initial bundle size, load time, JS requests, chunk transfer sizes) are recorded manually via Chrome DevTools under Slow 3G throttling.
+---
 
-## Practical 9 — In-Memory Caching and Query Optimization
+## MongoDB Query Optimization
 
-### Overview
-Practical 9 implements server-side in-memory caching using `node-cache` and database query optimization in MongoDB/Mongoose to reduce response latency and database read load for task retrieval.
+1. **Compound Index:**
+   ```javascript
+   taskSchema.index({ user: 1, createdAt: -1 });
+   ```
+   Directly accelerates `Task.find({ user: req.user.id }).sort({ createdAt: -1 })` using an index scan (`IXSCAN`), avoiding full collection scans (`COLLSCAN`) and memory sorting.
 
-### Concepts & Implementation Details
-- **In-Memory Caching (`node-cache`)**:
-  - Implemented shared cache module in `utils/cache.js` with standard TTL of 60 seconds (`stdTTL: 60`).
-  - Read endpoints check memory first before querying MongoDB.
-  - Returns `X-Cache: HIT` or `X-Cache: MISS` response headers.
-- **Cache Keys & Multi-Tenant Data Isolation**:
-  - All tasks list: `tasks:${userId}`
-  - Single task item: `task:${userId}:${taskId}`
-  - Including the authenticated `userId` guarantees complete user data isolation.
-- **Cache Invalidation on Writes**:
-  - `POST /api/tasks`: Invalidates `tasks:${userId}` upon successful creation.
-  - `PUT /api/tasks/:id`: Invalidates both `tasks:${userId}` and `task:${userId}:${taskId}` upon successful update.
-  - `DELETE /api/tasks/:id`: Invalidates both `tasks:${userId}` and `task:${userId}:${taskId}` upon successful deletion.
-  - Invalidation only triggers on successful operations (never on validation failure or 404).
-- **Query Optimizations**:
-  - **Mongoose Compound Index**: `taskSchema.index({ user: 1, createdAt: -1 })` avoids full collection scans (`COLLSCAN`) and memory sort overhead during task list queries.
-  - **Single Field Index**: `user: { index: true }` accelerates single-item lookups.
-  - **`.lean()` Execution**: Bypasses Mongoose document hydration to return plain JavaScript objects, reducing CPU and RAM overhead.
-- **Cache Monitoring & Telemetry**:
-  - Protected endpoint `GET /api/tasks/cache-stats` (alias `GET /api/tasks/cache/debug`) reports hit/miss/invalidation counters without exposing secrets or task data.
-  - Protected endpoint `POST /api/tasks/cache-stats/reset` resets telemetry counters for clean benchmarking.
-- **Cache Bypass for Benchmarking**:
-  - Set `CACHE_ENABLED=false` in `.env`, or send request header `x-skip-cache: true` in Thunder Client.
+2. **Single-Field Index:**
+   ```javascript
+   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true }
+   ```
+   Speeds up single-task lookups by user.
 
+3. **Mongoose `.lean()`:**
+   Converts Mongoose Documents into lightweight Plain Old JavaScript Objects (POJOs), eliminating hydration overhead and decreasing response serialization time.
+
+---
+
+## Benchmarking Guide (Thunder Client)
+
+### 1. Measure Uncached Baseline
+1. Send `POST http://localhost:5000/api/auth/login` to obtain a JWT token.
+2. In Thunder Client, configure a `GET http://localhost:5000/api/tasks` request with `Authorization: Bearer <token>`.
+3. Add the header:
+   ```http
+   x-skip-cache: true
+   ```
+4. Send the request 3 times and record the response time in milliseconds displayed in Thunder Client (`X-Cache: MISS`).
+
+### 2. Measure Cached Performance
+1. Remove or disable the `x-skip-cache` header.
+2. Send request 1: Cache miss (populates the cache with 60s TTL).
+3. Send requests 2, 3, and 4: Cache hits (`X-Cache: HIT` served directly from memory).
+4. Record response times to measure latency reduction.
+
+---
+
+## Verification & Automated Tests
+
+Run the test suite:
+```bash
+npm test
+```
+The test suite validates:
+- Unauthorized access rejection (`401`)
+- Invalid token rejection (`401`)
+- Malformed ID validation (`400`)
+- Non-existent ID handling (`404`)
+- All-tasks cache miss then hit (`X-Cache: MISS` ➔ `HIT`)
+- User-level cache isolation across distinct accounts
+- Write invalidation on `POST`, `PUT`, and `DELETE`
+- Single task caching on `GET /api/tasks/:id`
+- Telemetry reporting on `/api/tasks/cache-stats`
+- Cache bypass via `x-skip-cache` header
