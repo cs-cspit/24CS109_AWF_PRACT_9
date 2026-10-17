@@ -43,8 +43,8 @@ A full-stack Task Management application featuring JWT-based authentication, bcr
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/24cs73-prince/24CS073_AWDF_P9.git
-cd 24CS073_AWDF_P9
+git clone https://github.com/cs-cspit/24CS109_AWF_PRACT_9.git
+cd 24CS109_AWF_PRACT_9
 
 # 2. Install dependencies
 npm install
